@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use std::net::SocketAddr;
 use flexi_logger::{detailed_format, Duplicate};
 use log::info;
@@ -5,9 +8,11 @@ use tokio::signal;
 use dotenv::dotenv;
 
 use crate::router::register_router;
+use crate::utils::g::{init_jwt_secret, init_mysql_rbatis_session};
 
 mod router;
 mod controller;
+mod utils;
 
 fn init_log() {
     flexi_logger::Logger::with_str("debug")
@@ -67,7 +72,10 @@ async fn main() {
     // init log
     init_log();
 
+    // init jwt secret and db session
     dotenv().ok();
+    init_jwt_secret().await;
+    init_mysql_rbatis_session().await;
 
     // run it
     let listen_addr_str = "0.0.0.0:4000";
