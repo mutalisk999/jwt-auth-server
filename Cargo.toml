@@ -1,0 +1,27 @@
+[package]
+name = "jwt-auth-server"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = "0.5.11"
+axum-core = "0.2.7"
+tokio = { version = "1.15.0", features = ["full"] }
+tokio-util = "0.7.3"
+tower = { version = "0.4", features = ["util", "timeout", "load-shed", "limit"] }
+tower-http = { version = "0.3.0", features = ["add-extension", "auth", "compression-full", "trace"] }
+hyper = "0.14"
+dotenv = "0.15.0"
+serde = {version = "1.0", features = ["derive"]}
+serde_derive = "1.0"
+serde_json = {version = "1.0"}
+flexi_logger = "0.17"
+log = "0.4.14"
+bytes = "1.1.0"
+lazy_static = "1.4.0"
+rbson = "2.0"
+rbatis = { version = "3.1.4", default-features = false, features = ["mysql","runtime-tokio-native-tls"] }
+sqlx-core = { version = "0.5.11", default-features = false, features = ["runtime-tokio-native-tls"] }
+jsonwebtoken = "8.0.1"
