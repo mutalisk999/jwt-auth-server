@@ -2,10 +2,11 @@
 extern crate lazy_static;
 
 use std::net::SocketAddr;
+
+use dotenv::dotenv;
 use flexi_logger::{detailed_format, Duplicate};
 use log::info;
 use tokio::signal;
-use dotenv::dotenv;
 
 use crate::router::register_router;
 use crate::utils::g::{init_jwt_secret, init_mysql_rbatis_session};

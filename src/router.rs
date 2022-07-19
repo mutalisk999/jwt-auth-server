@@ -1,9 +1,9 @@
-use axum_core::response::IntoResponse;
-use axum::Router;
 use axum::error_handling::HandleErrorLayer;
-use tower::{BoxError, ServiceBuilder};
-use tokio::time::Duration;
+use axum::Router;
+use axum_core::response::IntoResponse;
 use hyper::http::StatusCode;
+use tokio::time::Duration;
+use tower::{BoxError, ServiceBuilder};
 
 use crate::controller::auth::auth_routes;
 

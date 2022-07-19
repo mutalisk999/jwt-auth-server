@@ -1,10 +1,7 @@
-use rbatis::rbatis::Rbatis;
 use rbatis::crud::CRUD;
 use rbatis::crud_table;
-use rbatis::core::Error;
 
 use crate::utils::g::RB_SESSION;
-
 
 #[crud_table]
 #[derive(Default, Clone, Debug)]

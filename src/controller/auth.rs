@@ -1,64 +1,29 @@
-use std::{env, fmt};
-use std::sync::Arc;
-
 use axum::{Extension, Json, Router};
-use axum::extract::{BodyStream, Path};
 use axum::routing::{get, post};
 use axum_core::response::{IntoResponse, Response};
-
-use bytes::Bytes;
-use hyper::body;
-use hyper::body::Body;
+use chrono::Utc;
 use hyper::http::{HeaderMap, HeaderValue};
 use hyper::http::header::HeaderName;
 use hyper::http::StatusCode;
-use log::warn;
-
+use jsonwebtoken::{Algorithm, decode, DecodingKey, encode, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::RwLock;
 
-use chrono::Utc;
-use jsonwebtoken::{Algorithm, decode, DecodingKey, encode, EncodingKey, Header, Validation};
-
-use crate::utils::g::{RB_SESSION, JWT_SECRET};
-use crate::model::t_user::{TUser, query_t_user_by_name};
-
+use crate::model::t_user::{query_t_user_by_name, TUser};
+use crate::utils::g::{JWT_SECRET, RB_SESSION};
 
 const BEARER: &str = "Bearer ";
+const AUTHORIZATION: &str = "AUTHORIZATION";
 
-#[derive(Clone, PartialEq)]
-pub enum Role {
-    Admin,
-    User,
-}
-
-impl Role {
-    pub fn from_str(role: &str) -> Role {
-        match role {
-            "Admin" => Role::Admin,
-            _ => Role::User,
-        }
-    }
-}
-
-impl fmt::Display for Role {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Role::User => write!(f, "User"),
-            Role::Admin => write!(f, "Admin"),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Claims {
     sub: String,
-    role: String,
-    exp: usize,
+    role: u8,
+    exp: i64,
 }
 
-pub async fn create_jwt(uid: &str, role: &Role, expire: i64) -> Result<String, JwtError> {
+pub async fn create_jwt(uid: &str, role: u8, expire: i64) -> Result<String, AuthError> {
     let expiration = Utc::now()
         .checked_add_signed(chrono::Duration::seconds(expire))
         .expect("invalid timestamp")
@@ -66,8 +31,8 @@ pub async fn create_jwt(uid: &str, role: &Role, expire: i64) -> Result<String, J
 
     let claims = Claims {
         sub: uid.to_owned(),
-        role: role.to_string(),
-        exp: expiration as usize,
+        role,
+        exp: expiration,
     };
     let header = Header::new(Algorithm::HS512);
     encode(&header, &claims, &EncodingKey::from_secret(JWT_SECRET
@@ -75,38 +40,27 @@ pub async fn create_jwt(uid: &str, role: &Role, expire: i64) -> Result<String, J
         .read()
         .await.clone().as_ref()))
         .map(|jwt_str| BEARER.to_string() + &jwt_str)
-        .map_err(|_| JwtError::JWTTokenCreationError)
+        .map_err(|_| AuthError::TokenCreationError)
 }
 
-pub async fn verify_jwt(jwt_str: &String) -> Result<Claims, JwtError> {
+pub async fn verify_jwt(jwt_str: &String) -> Result<Claims, AuthError> {
     if !jwt_str.starts_with(BEARER) {
-        return Err(JwtError::InvalidAuthHeaderError);
+        return Err(AuthError::InvalidTokenError);
     }
     let jwt_str = jwt_str.trim_start_matches(BEARER)
         .to_owned();
 
     let decoded = decode::<Claims>(jwt_str.as_ref(),
                                    &DecodingKey::from_secret(JWT_SECRET.as_ref().read().await.clone().as_ref()),
-                                   &Validation::new(Algorithm::HS512)).map_err(|_| JwtError::JWTTokenError)?;
+                                   &Validation::new(Algorithm::HS512)).map_err(|_| AuthError::InvalidTokenError)?;
     Ok(decoded.claims.clone())
 }
 
-pub async fn check_authority(role: Role, jwt_str: &String) -> Result<Claims, JwtError> {
-    let claim = match verify_jwt(jwt_str).await {
-        Ok(v) => v,
-        Err(e) => return Err(e),
-    };
-
-    if role == Role::Admin && Role::from_str(&claim.role) != Role::Admin {
-        return Err(JwtError::NoPermissionError);
-    }
-    Ok(claim)
-}
 
 pub fn auth_routes() -> Router {
     Router::new()
         .route("/authorize", post(authorize))
-        .route("/verify_authority", get(verify_authority))
+        .route("/verify", get(verify))
         .layer(Extension(RB_SESSION.clone()))
 }
 
@@ -120,7 +74,7 @@ async fn authorize(Json(payload): Json<AuthPayload>) -> Result<HeaderMap, AuthEr
         .await;
 
     if res.is_err() {
-        return Err(AuthError::RbatisQueryError);
+        return Err(AuthError::RBatisQueryError);
     }
     let res = res.unwrap();
 
@@ -134,33 +88,51 @@ async fn authorize(Json(payload): Json<AuthPayload>) -> Result<HeaderMap, AuthEr
             return Err(AuthError::WrongCredentials);
         } else {
             let id = res.id.unwrap().to_string();
-            let role = res.id.unwrap();
+            let role = res.role.unwrap();
 
-            let res = if role == 0u64 {
-                create_jwt(&id, &Role::Admin, 3600).await
-            } else {
-                create_jwt(&id, &Role::User, 3600).await
-            };
+            let res = create_jwt(&id, role, 86400).await;
+            match res {
+                Ok(v) => {
+                    let mut headers = HeaderMap::new();
 
-            // create jwt fail
-            if res.is_err() {
-                Err(AuthError::TokenCreation)
-            } else {
-                let mut headers = HeaderMap::new();
+                    headers.insert(
+                        HeaderName::from_static(AUTHORIZATION),
+                        HeaderValue::from_str(v.as_str()).unwrap(),
+                    );
 
-                headers.insert(
-                    HeaderName::from_static("Authorization"),
-                    HeaderValue::from_str(res.unwrap().as_str()).unwrap(),
-                );
-
-                Ok(headers)
+                    Ok(headers)
+                }
+                Err(e) => Err(e),
             }
         }
     }
 }
 
-async fn verify_authority(headers: HeaderMap) -> Result<(), AuthError> {
-    Err(AuthError::WrongCredentials)
+async fn verify(headers: HeaderMap) -> Result<Json<Claims>, AuthError> {
+    let mut jwt_str = String::default();
+    let mut jwt_found = false;
+
+    if let Some(auth_token) = headers.get(HeaderName::from_static(AUTHORIZATION)) {
+        if let Ok(auth_token_str) = auth_token.to_str() {
+            jwt_str = auth_token_str.to_string();
+            jwt_found = true;
+        }
+    }
+    if !jwt_found {
+        // not found valid header
+        return Err(AuthError::NoAuthHeaderError);
+    }
+
+    let claim = match verify_jwt(&jwt_str).await {
+        Ok(v) => v,
+        Err(e) => return Err(e),
+    };
+
+    if claim.exp < Utc::now().timestamp() {
+        return Err(AuthError::ExpirationToken);
+    }
+
+    Ok(axum::Json(claim))
 }
 
 
@@ -175,9 +147,11 @@ impl IntoResponse for AuthError {
         let (status, error_message) = match self {
             AuthError::WrongCredentials => (StatusCode::UNAUTHORIZED, "Wrong credentials"),
             AuthError::MissingCredentials => (StatusCode::BAD_REQUEST, "Missing credentials"),
-            AuthError::RbatisQueryError => (StatusCode::INTERNAL_SERVER_ERROR, "Rbatis query error"),
-            AuthError::TokenCreation => (StatusCode::INTERNAL_SERVER_ERROR, "Token creation error"),
-            AuthError::InvalidToken => (StatusCode::BAD_REQUEST, "Invalid token"),
+            AuthError::RBatisQueryError => (StatusCode::INTERNAL_SERVER_ERROR, "RBatis query error"),
+            AuthError::TokenCreationError => (StatusCode::INTERNAL_SERVER_ERROR, "Token creation error"),
+            AuthError::InvalidTokenError => (StatusCode::BAD_REQUEST, "Invalid token error"),
+            AuthError::ExpirationToken => (StatusCode::UNAUTHORIZED, "Expiration token"),
+            AuthError::NoAuthHeaderError => (StatusCode::BAD_REQUEST, "No auth header token error"),
         };
         let body = Json(json!({
             "error": error_message,
@@ -187,20 +161,12 @@ impl IntoResponse for AuthError {
 }
 
 #[derive(Debug)]
-enum AuthError {
+pub enum AuthError {
     MissingCredentials,
     WrongCredentials,
-    RbatisQueryError,
-    TokenCreation,
-    InvalidToken,
-}
-
-#[derive(Debug)]
-pub enum JwtError {
-    WrongCredentialsError,
-    JWTTokenError,
-    JWTTokenCreationError,
+    RBatisQueryError,
+    TokenCreationError,
+    ExpirationToken,
     NoAuthHeaderError,
-    InvalidAuthHeaderError,
-    NoPermissionError,
+    InvalidTokenError,
 }

@@ -2,9 +2,6 @@ use std::env;
 use std::sync::Arc;
 
 use rbatis::core::db::{DBConnectOption, DBPoolOptions};
-use rbatis::core::Error;
-use rbatis::crud::CRUD;
-use rbatis::crud_table;
 use rbatis::rbatis::Rbatis;
 use sqlx_core::mysql::MySqlConnectOptions;
 use tokio::sync::RwLock;
