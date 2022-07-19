@@ -2,8 +2,8 @@ use axum::{Extension, Json, Router};
 use axum::routing::{get, post};
 use axum_core::response::{IntoResponse, Response};
 use chrono::Utc;
+use hyper;
 use hyper::http::{HeaderMap, HeaderValue};
-use hyper::http::header::HeaderName;
 use hyper::http::StatusCode;
 use jsonwebtoken::{Algorithm, decode, DecodingKey, encode, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,6 @@ use crate::model::t_user::{query_t_user_by_name, TUser};
 use crate::utils::g::{JWT_SECRET, RB_SESSION};
 
 const BEARER: &str = "Bearer ";
-const AUTHORIZATION: &str = "AUTHORIZATION";
 
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -96,7 +95,7 @@ async fn authorize(Json(payload): Json<AuthPayload>) -> Result<HeaderMap, AuthEr
                     let mut headers = HeaderMap::new();
 
                     headers.insert(
-                        HeaderName::from_static(AUTHORIZATION),
+                        hyper::http::header::AUTHORIZATION,
                         HeaderValue::from_str(v.as_str()).unwrap(),
                     );
 
@@ -112,7 +111,7 @@ async fn verify(headers: HeaderMap) -> Result<Json<Claims>, AuthError> {
     let mut jwt_str = String::default();
     let mut jwt_found = false;
 
-    if let Some(auth_token) = headers.get(HeaderName::from_static(AUTHORIZATION)) {
+    if let Some(auth_token) = headers.get(hyper::http::header::AUTHORIZATION) {
         if let Ok(auth_token_str) = auth_token.to_str() {
             jwt_str = auth_token_str.to_string();
             jwt_found = true;
