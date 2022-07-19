@@ -13,6 +13,7 @@ use crate::utils::g::{init_jwt_secret, init_mysql_rbatis_session};
 mod router;
 mod controller;
 mod utils;
+mod model;
 
 fn init_log() {
     flexi_logger::Logger::with_str("debug")

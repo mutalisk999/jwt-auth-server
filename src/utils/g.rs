@@ -14,6 +14,7 @@ lazy_static! {
     pub static ref JWT_SECRET: Arc::<RwLock<Vec<u8>>> = Arc::new(RwLock::new(Vec::new()));
 }
 
+
 pub async fn init_mysql_rbatis_session() {
     let mysql_host = env::var("MYSQL_HOST")
         .unwrap_or_else(|e| panic!("no MYSQL_HOST in .env: {}", e.to_string()));
