@@ -1,13 +1,18 @@
-use axum::{Extension, Json, Router};
+use axum::{Extension, Router};
+use axum::extract::{BodyStream, Json};
 use axum::routing::{get, post};
 use axum_core::response::{IntoResponse, Response};
 use chrono::Utc;
 use hyper;
+use hyper::body;
+use hyper::body::Body;
 use hyper::http::{HeaderMap, HeaderValue};
 use hyper::http::StatusCode;
 use jsonwebtoken::{Algorithm, decode, DecodingKey, encode, EncodingKey, Header, Validation};
+use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use thiserror;
 
 use crate::model::t_user::{query_t_user_by_name, TUser};
 use crate::utils::g::{JWT_SECRET, RB_SESSION};
@@ -63,34 +68,65 @@ pub fn auth_routes() -> Router {
         .layer(Extension(RB_SESSION.clone()))
 }
 
-async fn authorize(Json(payload): Json<AuthPayload>) -> Result<HeaderMap, AuthError> {
+async fn authorize(stream: BodyStream) -> Result<HeaderMap, AuthError> {
+    let mut bytes_req: Vec<u8> = vec![];
+    match body::to_bytes(Body::wrap_stream(stream)).await {
+        Ok(v) => {
+            bytes_req.extend_from_slice(v.to_vec().as_slice());
+        }
+        Err(e) => {
+            // read body stream error
+            warn!("Read body stream error: {}", e.to_string());
+            return Err(AuthError::MissingCredentials);
+        }
+    }
+
+    let req_str = match std::str::from_utf8(&bytes_req) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("From vec to string error: {}", e.to_string());
+            return Err(AuthError::MissingCredentials);
+        }
+    };
+
+    let payload: AuthPayload = match serde_json::from_str(req_str) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("payload from string error: {}", e.to_string());
+            return Err(AuthError::MissingCredentials);
+        }
+    };
+
     // Check if the user sent the credentials
     if payload.username.is_empty() || payload.password.is_empty() {
-        return Err(AuthError::MissingCredentials);
+        warn!("payload is empty");
+        return Err(AuthError::WrongCredentials);
     }
 
-    let res: Result<Option<TUser>, rbatis::core::Error> = query_t_user_by_name(&payload.username)
-        .await;
-
-    if res.is_err() {
-        return Err(AuthError::RBatisQueryError);
-    }
-    let res = res.unwrap();
+    let res: Option<TUser> = match query_t_user_by_name(&payload.username).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("query_t_user_by_name error: {}", e.to_string());
+            return Err(AuthError::RBatisQueryError);
+        }
+    };
 
     if res.is_none() {
+        warn!("query_t_user_by_name returns none");
         return Err(AuthError::WrongCredentials);
     } else {
         let res = res.unwrap();
 
         // invalid password
         if res.password.unwrap() != payload.password {
+            warn!("invalid password");
             return Err(AuthError::WrongCredentials);
         } else {
             let id = res.id.unwrap().to_string();
             let role = res.role.unwrap();
 
             let res = create_jwt(&id, role, 86400).await;
-            match res {
+            return match res {
                 Ok(v) => {
                     let mut headers = HeaderMap::new();
 
@@ -98,11 +134,13 @@ async fn authorize(Json(payload): Json<AuthPayload>) -> Result<HeaderMap, AuthEr
                         hyper::http::header::AUTHORIZATION,
                         HeaderValue::from_str(v.as_str()).unwrap(),
                     );
-
                     Ok(headers)
                 }
-                Err(e) => Err(e),
-            }
+                Err(e) => {
+                    warn!("create_jwt error: {}", e.to_string());
+                    Err(e)
+                }
+            };
         }
     }
 }
@@ -119,15 +157,20 @@ async fn verify(headers: HeaderMap) -> Result<Json<Claims>, AuthError> {
     }
     if !jwt_found {
         // not found valid header
+        warn!("not found valid header [authorization]");
         return Err(AuthError::NoAuthHeaderError);
     }
 
     let claim = match verify_jwt(&jwt_str).await {
         Ok(v) => v,
-        Err(e) => return Err(e),
+        Err(e) => {
+            warn!("verify_jwt error: {}", e.to_string());
+            return Err(e);
+        }
     };
 
     if claim.exp < Utc::now().timestamp() {
+        warn!("token is expired");
         return Err(AuthError::ExpirationToken);
     }
 
@@ -144,13 +187,13 @@ struct AuthPayload {
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
-            AuthError::WrongCredentials => (StatusCode::UNAUTHORIZED, "Wrong credentials"),
-            AuthError::MissingCredentials => (StatusCode::BAD_REQUEST, "Missing credentials"),
-            AuthError::RBatisQueryError => (StatusCode::INTERNAL_SERVER_ERROR, "RBatis query error"),
-            AuthError::TokenCreationError => (StatusCode::INTERNAL_SERVER_ERROR, "Token creation error"),
-            AuthError::InvalidTokenError => (StatusCode::BAD_REQUEST, "Invalid token error"),
-            AuthError::ExpirationToken => (StatusCode::UNAUTHORIZED, "Expiration token"),
-            AuthError::NoAuthHeaderError => (StatusCode::BAD_REQUEST, "No auth header token error"),
+            AuthError::MissingCredentials => (StatusCode::BAD_REQUEST, self.to_string()),
+            AuthError::WrongCredentials => (StatusCode::UNAUTHORIZED, self.to_string()),
+            AuthError::RBatisQueryError => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            AuthError::TokenCreationError => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            AuthError::ExpirationToken => (StatusCode::UNAUTHORIZED, self.to_string()),
+            AuthError::NoAuthHeaderError => (StatusCode::BAD_REQUEST, self.to_string()),
+            AuthError::InvalidTokenError => (StatusCode::BAD_REQUEST, self.to_string()),
         };
         let body = Json(json!({
             "error": error_message,
@@ -159,13 +202,20 @@ impl IntoResponse for AuthError {
     }
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum AuthError {
+    #[error("missing credentials")]
     MissingCredentials,
+    #[error("wrong credentials")]
     WrongCredentials,
+    #[error("rbatis query error")]
     RBatisQueryError,
+    #[error("token creation error")]
     TokenCreationError,
+    #[error("expiration token")]
     ExpirationToken,
+    #[error("no auth header error")]
     NoAuthHeaderError,
+    #[error("invalid token error")]
     InvalidTokenError,
 }
