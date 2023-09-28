@@ -12,7 +12,6 @@ pub struct TUser {
     pub role: Option<u8>,
 }
 
-
 pub async fn query_t_user_by_name(username: &String) -> Result<Option<TUser>, rbatis::core::Error> {
     let session = RB_SESSION.as_ref().read().await;
     let w = session
@@ -21,9 +20,5 @@ pub async fn query_t_user_by_name(username: &String) -> Result<Option<TUser>, rb
         .new_wrapper()
         .eq("username", username);
 
-    session
-        .as_ref()
-        .unwrap()
-        .fetch_by_wrapper(w)
-        .await
+    session.as_ref().unwrap().fetch_by_wrapper(w).await
 }

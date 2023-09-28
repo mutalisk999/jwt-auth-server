@@ -11,10 +11,10 @@ use tokio::signal;
 use crate::router::register_router;
 use crate::utils::g::{init_jwt_secret, init_mysql_rbatis_session};
 
-mod router;
 mod controller;
-mod utils;
 mod model;
+mod router;
+mod utils;
 
 fn init_log() {
     flexi_logger::Logger::with_str("debug")
@@ -30,7 +30,7 @@ fn init_log() {
 
 async fn shutdown_signal() {
     #[cfg(unix)]
-        let ctrl_c = async {
+    let ctrl_c = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())
             .expect("failed to install Ctrl+C handler")
             .recv()
@@ -39,15 +39,17 @@ async fn shutdown_signal() {
     };
 
     #[cfg(not(unix))]
-        let ctrl_c = async {
-        signal::windows::ctrl_c().unwrap().recv()
+    let ctrl_c = async {
+        signal::windows::ctrl_c()
+            .unwrap()
+            .recv()
             .await
             .expect("failed to install Ctrl+C handler");
         info!("terminated by Ctrl+C");
     };
 
     #[cfg(unix)]
-        let terminate = async {
+    let terminate = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())
             .expect("failed to install signal handler")
             .recv()
@@ -56,8 +58,10 @@ async fn shutdown_signal() {
     };
 
     #[cfg(not(unix))]
-        let terminate = async {
-        signal::windows::ctrl_break().unwrap().recv()
+    let terminate = async {
+        signal::windows::ctrl_break()
+            .unwrap()
+            .recv()
             .await
             .expect("failed to install Ctrl+Break handler");
         info!("terminated by Ctrl+Break");

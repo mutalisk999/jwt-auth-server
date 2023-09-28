@@ -1,14 +1,14 @@
-use axum::{Extension, Router};
 use axum::extract::{BodyStream, Json};
 use axum::routing::{get, post};
+use axum::{Extension, Router};
 use axum_core::response::{IntoResponse, Response};
 use chrono::Utc;
 use hyper;
 use hyper::body;
 use hyper::body::Body;
-use hyper::http::{HeaderMap, HeaderValue};
 use hyper::http::StatusCode;
-use jsonwebtoken::{Algorithm, decode, DecodingKey, encode, EncodingKey, Header, Validation};
+use hyper::http::{HeaderMap, HeaderValue};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -18,7 +18,6 @@ use crate::model::t_user::{query_t_user_by_name, TUser};
 use crate::utils::g::{JWT_SECRET, RB_SESSION};
 
 const BEARER: &str = "Bearer ";
-
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Claims {
@@ -39,27 +38,29 @@ pub async fn create_jwt(uid: &str, role: u8, expire: i64) -> Result<String, Auth
         exp: expiration,
     };
     let header = Header::new(Algorithm::HS512);
-    encode(&header, &claims, &EncodingKey::from_secret(JWT_SECRET
-        .as_ref()
-        .read()
-        .await.clone().as_ref()))
-        .map(|jwt_str| BEARER.to_string() + &jwt_str)
-        .map_err(|_| AuthError::TokenCreationError)
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_secret(JWT_SECRET.as_ref().read().await.clone().as_ref()),
+    )
+    .map(|jwt_str| BEARER.to_string() + &jwt_str)
+    .map_err(|_| AuthError::TokenCreationError)
 }
 
 pub async fn verify_jwt(jwt_str: &String) -> Result<Claims, AuthError> {
     if !jwt_str.starts_with(BEARER) {
         return Err(AuthError::InvalidTokenError);
     }
-    let jwt_str = jwt_str.trim_start_matches(BEARER)
-        .to_owned();
+    let jwt_str = jwt_str.trim_start_matches(BEARER).to_owned();
 
-    let decoded = decode::<Claims>(jwt_str.as_ref(),
-                                   &DecodingKey::from_secret(JWT_SECRET.as_ref().read().await.clone().as_ref()),
-                                   &Validation::new(Algorithm::HS512)).map_err(|_| AuthError::InvalidTokenError)?;
+    let decoded = decode::<Claims>(
+        jwt_str.as_ref(),
+        &DecodingKey::from_secret(JWT_SECRET.as_ref().read().await.clone().as_ref()),
+        &Validation::new(Algorithm::HS512),
+    )
+    .map_err(|_| AuthError::InvalidTokenError)?;
     Ok(decoded.claims.clone())
 }
-
 
 pub fn auth_routes() -> Router {
     Router::new()
@@ -176,7 +177,6 @@ async fn verify(headers: HeaderMap) -> Result<Json<Claims>, AuthError> {
 
     Ok(axum::Json(claim))
 }
-
 
 #[derive(Debug, Deserialize)]
 struct AuthPayload {

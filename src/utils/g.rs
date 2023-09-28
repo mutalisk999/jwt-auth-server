@@ -11,7 +11,6 @@ lazy_static! {
     pub static ref JWT_SECRET: Arc::<RwLock<Vec<u8>>> = Arc::new(RwLock::new(Vec::new()));
 }
 
-
 pub async fn init_mysql_rbatis_session() {
     let mysql_host = env::var("MYSQL_HOST")
         .unwrap_or_else(|e| panic!("no MYSQL_HOST in .env: {}", e.to_string()));
@@ -19,8 +18,8 @@ pub async fn init_mysql_rbatis_session() {
         .unwrap_or_else(|e| panic!("no MYSQL_PORT in .env: {}", e.to_string()))
         .parse::<u16>()
         .unwrap();
-    let mysql_db = env::var("MYSQL_DB")
-        .unwrap_or_else(|e| panic!("no MYSQL_DB in .env: {}", e.to_string()));
+    let mysql_db =
+        env::var("MYSQL_DB").unwrap_or_else(|e| panic!("no MYSQL_DB in .env: {}", e.to_string()));
     let mysql_user = env::var("MYSQL_USER")
         .unwrap_or_else(|e| panic!("no MYSQL_USER in .env: {}", e.to_string()));
     let mysql_pass = env::var("MYSQL_PASS")
@@ -35,16 +34,13 @@ pub async fn init_mysql_rbatis_session() {
         .username(&mysql_user)
         .password(&mysql_pass);
 
-    let db_cfg = DBConnectOption::from_mysql(&db_cfg)
-        .unwrap_or_else(|e| panic!("from_mysql: {:?}", e));
+    let db_cfg =
+        DBConnectOption::from_mysql(&db_cfg).unwrap_or_else(|e| panic!("from_mysql: {:?}", e));
     rb.link_cfg(&db_cfg, DBPoolOptions::new())
         .await
         .unwrap_or_else(|e| panic!("link_cfg: {:?}", e));
 
-    let mut rb_session = RB_SESSION
-        .as_ref()
-        .write()
-        .await;
+    let mut rb_session = RB_SESSION.as_ref().write().await;
     *rb_session = Some(rb);
 }
 
